@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     if (b.startDate) body.startDate = b.startDate;
     if (b.mandateId) body.mandateId = b.mandateId;
 
-    const fee = applicationFee();
+    const fee = applicationFee(Number(b.amount));
     if (fee) body.applicationFee = fee;
 
     const sub = await asMerchant(`/v2/customers/${b.customerId}/subscriptions`, {

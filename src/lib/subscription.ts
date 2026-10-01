@@ -32,7 +32,7 @@ export async function createSubscription(opts: {
   if (opts.mandateId) body.mandateId = opts.mandateId;
   if (opts.startDate) body.startDate = opts.startDate;
 
-  const fee = applicationFee();
+  const fee = applicationFee(Number(opts.amount));
   if (fee) body.applicationFee = fee;
 
   return asMerchant(`/v2/customers/${opts.customerId}/subscriptions`, {

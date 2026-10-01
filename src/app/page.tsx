@@ -73,7 +73,7 @@ function ConnectPage() {
               </tr>
               <tr>
                 <th>Application fee</th>
-                <td>{env.applicationFeeAmount ? `EUR ${env.applicationFeeAmount}` : <span className="muted">disabled</span>}</td>
+                <td>{env.applicationFee ?? <span className="muted">disabled</span>}</td>
               </tr>
             </tbody>
           </table>

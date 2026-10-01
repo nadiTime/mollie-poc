@@ -21,7 +21,11 @@ export async function GET() {
       testmode: config.testmode,
       hasClientId: !!config.clientId,
       hasClientSecret: !!config.clientSecret,
-      applicationFeeAmount: config.applicationFeeAmount || null,
+      applicationFee: config.applicationFeePercent
+        ? `${config.applicationFeePercent}%`
+        : config.applicationFeeAmount
+          ? `EUR ${config.applicationFeeAmount}`
+          : null,
       publicUrlIsLocalhost: config.publicUrl.includes('localhost'),
     },
   });

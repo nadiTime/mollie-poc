@@ -135,7 +135,7 @@ async function createPayment(opts: {
   if (opts.mandateId) body.mandateId = opts.mandateId;
 
   // A €0.00 verification payment can't carry a fee.
-  const fee = Number(opts.amount) > 0 ? applicationFee() : undefined;
+  const fee = applicationFee(Number(opts.amount));
   if (fee) body.applicationFee = fee;
 
   return asMerchant('/v2/payments', { method: 'POST', testmode: true, body });

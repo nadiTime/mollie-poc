@@ -397,9 +397,13 @@ Mollie Components (`mollie.js` v1, used here) **only captures and tokenizes card
 challenge happens after payment creation, by sending the shopper to `_links.checkout`.
 
 Mollie's in-page equivalent is **Custom checkout with Components** (`mollie.js` v2, Checkout Sessions
-API), which does embed 3DS — but it is **private beta**, its docs show API-key auth only (not
-OAuth/Connect), and mandates/`sequenceType` aren't documented for it. Worth asking Mollie about if
-in-page 3DS matters: beta access + Connect support + recurring support.
+API), which does embed 3DS. As of 2026-07-31 it is still **private beta** — *"If you are interested in
+early access you can reach out to us."* Its docs also say nothing about whether OAuth/Connect access
+tokens are supported, and nothing about mandates, `sequenceType` or subscriptions.
+
+If in-page 3DS matters for the real integration, that's a three-part question for Mollie, not one:
+**(1)** beta access, **(2)** does it work with Connect access tokens, **(3)** can it create a mandate
+for recurring. A yes on 1 and 2 with a no on 3 still leaves subscriptions on the redirect flow.
 
 The redirect is card-only. SEPA mandate registration and `recurring` charges never redirect.
 
@@ -467,7 +471,133 @@ before you can test anything, which is why it's step 1 of this walkthrough.
 
 ---
 
-## 9. Gotchas discovered while building this
+## 9. Friction — what's annoying about Mollie
+
+Everything here was hit while building this PoC, not collected from opinion pieces. Some are fair
+trade-offs; the ones that cost real time are marked.
+
+### A card subscription takes three round-trips instead of one — **cost real time**
+
+In Stripe this is one call: create the Subscription, and its first invoice charges the card and
+attaches it to the customer. Done, synchronously, with one thing that can fail.
+
+In Mollie (§8.1) the same outcome needs:
+
+1. a `first` payment to obtain a mandate — a **payment object**, with a 3DS redirect, even at `€0.00`
+2. the shopper coming back, or not
+3. a **webhook** confirming that payment, at which point you create the subscription
+
+That's the difference between one API call and a distributed flow you have to design. Everything
+below follows from it and is now real code in this PoC:
+
+- The subscription can't be created in the request the user submitted, so the UI has to explain a
+  state that doesn't exist yet ("waiting for the webhook to create it")
+- Creation must live in the webhook handler, not the return page, because the shopper may close the
+  tab — so subscription creation happens in a code path with no user to show an error to
+- Mollie retries webhooks, so it needs its own idempotency guard (`subscribedPaymentIds`)
+- New failure modes with no Stripe equivalent: verification paid but subscription creation fails, and
+  the customer now has a stored mandate and no subscription
+- The intent has to be smuggled through Mollie and back via `metadata.intent`, because nothing in the
+  payment itself says "this was meant to become a subscription"
+
+None of this is exotic, but it's a day of work and a class of bugs that simply don't exist on the
+other platform. It was also where this PoC's only real bug came from — the double charge in §8.3.
+
+### The generally-available product is the old one
+
+Mollie Components v1 — the only card-embedding option you can actually use — is years old, and its
+documentation samples are still written with `var`. The modern rewrite (v2 Checkout Sessions, §8.4)
+is private beta. So the choice is "dated but available" or "current but you have to ask nicely".
+
+### Error messages point at the wrong thing — **cost real time**
+
+- Creating a **subscription** without `profileId` returns *"A website profile is required for
+  **payments**"*. Wrong noun, and it doesn't name the missing field.
+- *"The redirect URI provided is missing or does not match"* never tells you what **is** registered,
+  so you're guessing. The only way to find out is to omit `redirect_uri` entirely and see where you
+  land.
+
+### Undocumented defaults that cost money — **cost real time**
+
+`startDate` on a subscription is documented as optional with **no stated default**. It turns out to
+mean "charge immediately". Combined with the mandatory first payment, that silently double-charged
+during this build, and we only found out by reading the merchant's transaction list.
+
+### `profileId` is required but not obvious
+
+With an OAuth token every creation call — payments, customers, subscriptions — needs an explicit
+`profileId`. It's easy to miss because API-key integrations never need it, and the error (above)
+doesn't say so.
+
+### `testmode` is a per-call flag, not a separate credential
+
+Stripe gives you distinct test keys, so a mistake is inert. In Mollie the same token serves both, and
+forgetting `testmode: true` on one call silently touches live data. This PoC threads it through every
+request by hand for exactly that reason.
+
+### Webhooks carry nothing and prove nothing
+
+The body is `id=tr_…` and that's all — no status, no payload, and **no signature**. You must fetch
+the resource back on every ping, and you cannot verify the caller is Mollie. The endpoint's secrecy
+is the entire security model. Stripe signs its webhooks and includes the full event.
+
+### The sandbox doesn't run itself — **cost real time**
+
+- Payments with no checkout screen (SEPA, any `recurring` charge) sit at `pending` forever until you
+  manually open a `changePaymentState` link, which isn't surfaced anywhere obvious.
+- Mollie's own help article says SEPA test payments simply never confirm, without mentioning that
+  link — so the documented answer is "it can't be tested", which is wrong.
+- No equivalent of Stripe Test Clocks: to see subscription payment 2 you wait a real day.
+
+### You cannot test the platform's revenue model at all
+
+**Test mode never credits the balance.** Mollie is explicit: the application fee is visible in the
+payment details but is not added to the balance for test-mode payments. So it will never appear on
+the platform account until you go live.
+
+That means the one thing a platform most wants to verify before launch — that its cut is calculated
+and lands where expected — is exactly the thing the sandbox won't show you. You can confirm the
+`applicationFee` object is accepted on the payment and nothing more.
+
+Compounding it:
+
+- Fees **cannot be charged to the organization that created the OAuth app**, so testing them properly
+  needs a *third* organization, not just the usual platform + merchant pair.
+- The fee only moves on a payment that actually settles, and SEPA test payments never settle on their
+  own (above) — so even the payment-detail view needs manual nudging to reach a realistic state.
+- Mollie's own recommendation is to do Settlement/Balances work in the live environment.
+
+### Getting SEPA switched on is a process
+
+Direct Debit isn't self-serve: request it per website profile, wait up to 3 business days for review,
+and generally complete KYC first. Until then every SEPA call fails. Card needs none of this.
+
+### OAuth app config is thin
+
+- **One** redirect URL per app, so every environment needs its own app and its own credentials.
+- `approval_prompt=force` **revokes existing merchant authorizations** — a genuine footgun, mentioned
+  in passing in the docs, and it appears in plenty of example code.
+- `localhost` is rejected for both `webhookUrl` and `redirectUrl`, so you cannot do any local
+  development without a tunnel.
+
+### Odd API constraints
+
+- A subscription's `description` must be **unique per customer**, which makes a human-readable label
+  double as an idempotency key.
+- Card mandates can only come from a payment object — there's no dedicated setup/verification
+  resource, only the `€0.00` payment trick (§8.2).
+- Minimum subscription interval is 1 day.
+
+### Fair trade-offs, not complaints
+
+- The 3DS redirect (§8.4) is a real limitation, but SCA has to happen somewhere and Mollie's hosted
+  page is a legitimate place for it.
+- Mandate-based SEPA is clean and works exactly as you'd hope once enabled.
+- Token refresh, `_links` navigation and the overall REST shape are consistent and predictable.
+
+---
+
+## 10. Gotchas discovered while building this
 
 - **OAuth tokens need an explicit `profileId`.** Unlike an API key, an access token doesn't imply a
   profile, so `POST /v2/payments`, `POST /v2/customers` **and `POST /v2/customers/{id}/subscriptions`**
@@ -498,7 +628,7 @@ before you can test anything, which is why it's step 1 of this walkthrough.
 
 ---
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 | Symptom | Cause |
 | --- | --- |
