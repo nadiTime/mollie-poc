@@ -1,13 +1,29 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/client';
+import { useTestmode } from '@/lib/mode';
 
 type Customer = { id: string; name: string; email: string };
 type Mandate = { id: string; status: string; method: string; details: any };
 type Mode = 'onetime' | 'subscription';
 type Method = 'creditcard' | 'directdebit';
+
+/**
+ * mollie.js warns when `Mollie(...)` runs more than once and has no destroy API,
+ * so keep one instance (and its card fields) per profile + mode for the page's
+ * lifetime. Remounts only mount/unmount the existing components.
+ */
+type MollieSession = { m: any; components: any[] };
+const mollieSessions = new Map<string, MollieSession>();
+
+const CARD_FIELDS = [
+  ['cardHolder', '#card-holder'],
+  ['cardNumber', '#card-number'],
+  ['expiryDate', '#card-expiry'],
+  ['verificationCode', '#card-cvc'],
+] as const;
 
 /** Mirrors SUBSCRIPTION_PLAN on the server. */
 const PLAN_LABEL = 'daily, 2 payments total';
@@ -44,6 +60,12 @@ const FIELD_STYLE = {
 
 export default function PayPage() {
   const [profileId, setProfileId] = useState<string | null>(null);
+  const testmode = useTestmode();
+  // The mode this page loaded in. mollie.js can't switch modes in place: it has
+  // no destroy API, and a leftover instance crashes on the next instance's
+  // iframe messages ("reading 'isLoaded'"). So the card fields stay in this
+  // mode, and a flip of the switch gets a full reload below.
+  const loadedTestmode = useRef(testmode).current;
   const [connected, setConnected] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -83,34 +105,58 @@ export default function PayPage() {
 
   useEffect(() => { loadMandates(); }, [loadMandates]);
 
+  useEffect(() => {
+    if (testmode !== loadedTestmode) window.location.reload();
+  }, [testmode, loadedTestmode]);
+
   /* ── Mollie Components ─────────────────────────────────────────────── */
 
-  useEffect(() => {
-    if (!profileId || mollieRef.current) return;
+  // A card token only works in the mode its Mollie instance was created in —
+  // always `loadedTestmode` here, see above.
+  //
+  // Layout effect on purpose: its cleanup runs before React removes the field
+  // elements, so `unmount()` happens first. In a passive effect the nodes are
+  // already gone and mollie.js logs "component was not unmounted correctly".
+  useLayoutEffect(() => {
+    if (!profileId) return;
+    let cancelled = false;
+    let mounted: any[] = [];
 
     const init = () => {
       const Mollie = (window as any).Mollie;
-      if (!Mollie) return;
-      const m = Mollie(profileId, { locale: 'en_US', testmode: true });
-      mollieRef.current = m;
-      for (const [name, el] of [
-        ['cardHolder', '#card-holder'],
-        ['cardNumber', '#card-number'],
-        ['expiryDate', '#card-expiry'],
-        ['verificationCode', '#card-cvc'],
-      ] as const) {
-        m.createComponent(name, { styles: FIELD_STYLE }).mount(el);
+      if (!Mollie || cancelled) return;
+      const key = `${profileId}:${loadedTestmode}`;
+      let session = mollieSessions.get(key);
+      if (!session) {
+        const m = Mollie(profileId, { locale: 'en_US', testmode: loadedTestmode });
+        session = {
+          m,
+          components: CARD_FIELDS.map(([name]) => m.createComponent(name, { styles: FIELD_STYLE })),
+        };
+        mollieSessions.set(key, session);
       }
+      mollieRef.current = session.m;
+      session.components.forEach((c, i) => c.mount(CARD_FIELDS[i][1]));
+      mounted = session.components;
       setComponentsReady(true);
     };
 
-    if ((window as any).Mollie) return init();
-    const s = document.createElement('script');
-    s.src = 'https://js.mollie.com/v1/mollie.js';
-    s.onload = init;
-    s.onerror = () => setError('Could not load mollie.js');
-    document.body.appendChild(s);
-  }, [profileId]);
+    if ((window as any).Mollie) init();
+    else {
+      const s = document.createElement('script');
+      s.src = 'https://js.mollie.com/v1/mollie.js';
+      s.onload = init;
+      s.onerror = () => setError('Could not load mollie.js');
+      document.body.appendChild(s);
+    }
+
+    return () => {
+      cancelled = true;
+      for (const c of mounted) {
+        try { c.unmount(); } catch { /* not mounted */ }
+      }
+    };
+  }, [profileId, loadedTestmode]);
 
   /* ── actions ───────────────────────────────────────────────────────── */
 
@@ -125,6 +171,8 @@ export default function PayPage() {
         description,
         customerName: customer.name,
         customerEmail: customer.email,
+        // The mode the card token was made in; checkout refuses if the switch moved.
+        testmode: loadedTestmode,
       };
 
       if (method === 'creditcard') {
@@ -258,7 +306,10 @@ export default function PayPage() {
         <h2>Card details</h2>
         <p className="muted small">
           Fields are hosted by Mollie inside this page and tokenised client-side — the number never reaches
-          our server. Test card: <span className="mono">4111 1111 1111 1111</span>, any future expiry, any CVC.
+          our server.{' '}
+          {testmode
+            ? <>Test card: <span className="mono">4111 1111 1111 1111</span>, any future expiry, any CVC.</>
+            : <strong>Live mode — use a real card; it will be charged.</strong>}
         </p>
         <div className="row">
           <div className="col" style={{ flex: 2 }}>
@@ -284,8 +335,14 @@ export default function PayPage() {
         <div className="card">
           <h2>Bank account</h2>
           <p className="muted small">
-            Test IBAN: <span className="mono">NL55INGB0000000000</span>. In test mode the mandate is valid
-            immediately.
+            {testmode ? (
+              <>
+                Test IBAN: <span className="mono">NL55INGB0000000000</span>. In test mode the mandate is valid
+                immediately.
+              </>
+            ) : (
+              <strong>Live mode — enter a real IBAN; it will be debited after a few business days.</strong>
+            )}
           </p>
           <div className="row">
             <div className="col">
@@ -308,6 +365,7 @@ export default function PayPage() {
           >
             {busy ? 'Working…' : buttonLabel}
           </button>
+          {!testmode && <span className="pill err">LIVE — this charges real money</span>}
           {blocked && <span className="muted small">Customer name and email are required.</span>}
           {method === 'creditcard' && !componentsReady && <span className="muted small">loading mollie.js…</span>}
         </div>

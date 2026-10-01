@@ -2,7 +2,6 @@ export const config = {
   clientId: process.env.MOLLIE_CLIENT_ID || '',
   clientSecret: process.env.MOLLIE_CLIENT_SECRET || '',
   publicUrl: (process.env.PUBLIC_URL || 'http://localhost:3000').replace(/\/$/, ''),
-  testmode: (process.env.MOLLIE_TESTMODE ?? 'true') !== 'false',
   /** Override when the URL registered on the Mollie app isn't PUBLIC_URL + /api/connect/callback. */
   redirectUriOverride: (process.env.MOLLIE_REDIRECT_URI || '').trim(),
   /** redirect_uri is optional — omitting it makes Mollie use the registered URL. */

@@ -28,7 +28,7 @@ function ConnectPage() {
   return (
     <>
       <h1>Mollie Connect</h1>
-      <p className="muted small">Platform app ↔ connected merchant account, everything in test mode.</p>
+      <p className="muted small">Platform app ↔ connected merchant account, test or live per the switch in the top bar.</p>
 
       {params.get('msg') && <div className="banner">{params.get('msg')}</div>}
       {error && <div className="banner err">{error}</div>}
@@ -64,12 +64,6 @@ function ConnectPage() {
               <tr>
                 <th>Webhook URL</th>
                 <td className="mono small">{env.webhookUrl}</td>
-              </tr>
-              <tr>
-                <th>Test mode</th>
-                <td>
-                  <span className={`pill ${env.testmode ? 'ok' : 'warn'}`}>{String(env.testmode)}</span>
-                </td>
               </tr>
               <tr>
                 <th>Application fee</th>

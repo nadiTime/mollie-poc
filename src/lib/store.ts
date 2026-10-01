@@ -37,12 +37,14 @@ type Db = {
   webhooks: WebhookEvent[];
   /** Payment ids we already turned into a subscription — webhooks can repeat. */
   subscribedPaymentIds: string[];
+  /** App-wide test/live switch, flipped from the nav. Every Mollie call follows it. */
+  testmode: boolean;
 };
 
 const DB_DIR = path.join(process.cwd(), '.data');
 const DB_FILE = path.join(DB_DIR, 'db.json');
 
-const EMPTY: Db = { connection: null, oauthState: null, webhooks: [], subscribedPaymentIds: [] };
+const EMPTY: Db = { connection: null, oauthState: null, webhooks: [], subscribedPaymentIds: [], testmode: true };
 
 export async function readDb(): Promise<Db> {
   try {
@@ -67,6 +69,16 @@ export async function updateDb(fn: (db: Db) => void | Promise<void>): Promise<Db
 
 export async function getConnection(): Promise<Connection | null> {
   return (await readDb()).connection;
+}
+
+export async function getTestmode(): Promise<boolean> {
+  return (await readDb()).testmode;
+}
+
+export async function setTestmode(testmode: boolean): Promise<void> {
+  await updateDb((db) => {
+    db.testmode = testmode;
+  });
 }
 
 export async function addWebhook(event: WebhookEvent): Promise<void> {

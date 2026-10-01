@@ -18,7 +18,6 @@ export async function GET() {
       publicUrl: config.publicUrl,
       redirectUri: redirectUri(),
       webhookUrl: webhookUrl(),
-      testmode: config.testmode,
       hasClientId: !!config.clientId,
       hasClientSecret: !!config.clientSecret,
       applicationFee: config.applicationFeePercent

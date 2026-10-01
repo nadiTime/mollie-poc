@@ -16,6 +16,8 @@ export async function createSubscription(opts: {
   mandateId?: string;
   times?: number;
   startDate?: string;
+  /** Defaults to the app-wide switch; the webhook passes the payment's own mode. */
+  testmode?: boolean;
 }) {
   const body: Record<string, unknown> = {
     amount: { currency: 'EUR', value: Number(opts.amount).toFixed(2) },
@@ -37,7 +39,7 @@ export async function createSubscription(opts: {
 
   return asMerchant(`/v2/customers/${opts.customerId}/subscriptions`, {
     method: 'POST',
-    testmode: true,
+    testmode: opts.testmode,
     body,
   });
 }

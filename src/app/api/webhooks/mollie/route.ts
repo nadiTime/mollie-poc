@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { asMerchant } from '@/lib/mollie';
+import { fetchPayment } from '@/lib/mollie';
 import { addWebhook, readDb, updateDb, type WebhookEvent } from '@/lib/store';
 import { createSubscription } from '@/lib/subscription';
 
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
     // mandates/subscriptions need the customer id too.
     if (id.startsWith('tr_')) {
       try {
-        const payment = await asMerchant(`/v2/payments/${id}`, { testmode: true });
+        const payment = await fetchPayment(id);
         event.resource = payment;
         await maybeStartSubscription(payment, event);
       } catch (e: any) {
@@ -90,6 +90,8 @@ async function maybeStartSubscription(payment: any, event: WebhookEvent) {
       amount: payment.metadata.planAmount || payment.amount.value,
       description: `${payment.metadata.planDescription || payment.description} (${payment.id})`,
       mandateId: payment.mandateId,
+      // Same mode as the verification payment — its customer and mandate live there.
+      testmode: payment.mode === 'test',
       // The first payment was a €0.00 verification, so the full plan is still
       // owed and Mollie collects payment 1 right away.
     });

@@ -30,7 +30,7 @@ Nothing is deployed, nothing is persisted beyond a local JSON file. It exists to
 
 | Route | Contents |
 | --- | --- |
-| `/` — **Connect** | Setup checklist (env vars, public URL, redirect URI, webhook URL, test mode, app fee), connected-merchant panel with org/profile/token expiry, re-authorize & disconnect, onboarding-status button |
+| `/` — **Connect** | Setup checklist (env vars, public URL, redirect URI, webhook URL, app fee), connected-merchant panel with org/profile/token expiry, re-authorize & disconnect, onboarding-status button |
 | `/pay` — **Pay** | One-time vs subscription × card vs SEPA, one submit button · a fresh customer created per submit · card through Mollie Components · SEPA name+IBAN · read-only mandate table · last raw API response, with the test-mode *set status* link when present |
 | `/pay/return` — **Return** | Where Mollie sends the shopper back after a card redirect; polls the payment for 20s and shows its final state |
 | `/subscriptions` — **Subscriptions** | Read-only list (per customer or org-wide, polled every 5s) with amount, schedule, next payment date, status — plus cancel. Creation lives on `/pay` |
@@ -73,7 +73,8 @@ src/
 - No database, no auth, no multi-tenancy — one connected merchant at a time, stored in `.data/db.json`
 - No webhook signature verification (Mollie doesn't sign; the id is fetched back instead)
 - No refunds, chargebacks, payment links, or order API
-- Test mode only
+- Test mode by default. The **Test / LIVE** switch in the top bar flips the whole app to live — real
+  money, real cards and IBANs. The bar turns red while live
 
 ---
 
@@ -126,7 +127,6 @@ Edit `.env`:
 MOLLIE_CLIENT_ID=app_xxxxxxxxxxxx
 MOLLIE_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxx
 PUBLIC_URL=https://a1b2c3d4.ngrok-free.dev   # no trailing slash
-MOLLIE_TESTMODE=true
 
 # optional
 APPLICATION_FEE_AMOUNT=
@@ -148,7 +148,7 @@ On the **Connect** tab, the *Setup* table should show:
 
 - Client ID / secret → `set`
 - Public URL → your ngrok URL, with **no** red "localhost" warning
-- Test mode → `true`
+- Top bar switch → `Test` (grey). Flip it to `LIVE` (red bar) only when you mean to move real money
 
 If anything is red, fix `.env` and restart `npm run dev` (env changes are not hot-reloaded).
 
@@ -532,8 +532,10 @@ doesn't say so.
 ### `testmode` is a per-call flag, not a separate credential
 
 Stripe gives you distinct test keys, so a mistake is inert. In Mollie the same token serves both, and
-forgetting `testmode: true` on one call silently touches live data. This PoC threads it through every
-request by hand for exactly that reason.
+forgetting `testmode: true` on one call silently touches live data. This PoC keeps one app-wide switch
+(the top bar, stored in `.data/db.json`) that `asMerchant` applies to every call, so a route can't
+forget it.
+Checkout also refuses a submit from a page that was showing the other mode.
 
 ### Webhooks carry nothing and prove nothing
 

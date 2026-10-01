@@ -38,6 +38,45 @@ nav a {
   color: var(--muted);
 }
 nav a:hover { background: var(--panel-2); color: var(--text); }
+/* Live mode paints the whole bar so it can't be missed. */
+body[data-mode='live'] nav {
+  border-bottom: 2px solid var(--err);
+  background: color-mix(in srgb, var(--err) 12%, var(--panel));
+}
+
+.mode-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-weight: 600;
+}
+.mode-toggle .track {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  transition: background 0.15s;
+}
+.mode-toggle .thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 0.15s, background 0.15s;
+}
+.mode-toggle.live { color: var(--err); border-color: var(--err); }
+.mode-toggle.live .track { background: var(--err); border-color: var(--err); }
+.mode-toggle.live .thumb { transform: translateX(14px); background: #fff; }
 
 main { max-width: 980px; margin: 0 auto; padding: 24px; }
 

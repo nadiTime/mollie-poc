@@ -12,8 +12,8 @@ export async function GET() {
   try {
     const profileId = await merchantProfileId();
     const [enabled, all] = await Promise.all([
-      asMerchant('/v2/methods', { testmode: true, query: { profileId } }),
-      asMerchant('/v2/methods/all', { testmode: true, query: { profileId } }),
+      asMerchant('/v2/methods', { query: { profileId } }),
+      asMerchant('/v2/methods/all', { query: { profileId } }),
     ]);
     return NextResponse.json({
       profileId,

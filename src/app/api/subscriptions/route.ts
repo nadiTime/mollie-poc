@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   const customerId = new URL(req.url).searchParams.get('customerId');
   const path = customerId ? `/v2/customers/${customerId}/subscriptions` : '/v2/subscriptions';
   try {
-    const res = await asMerchant(path, { testmode: true, query: { limit: 50 } });
+    const res = await asMerchant(path, { query: { limit: 50 } });
     return NextResponse.json(res._embedded?.subscriptions ?? []);
   } catch (e: any) {
     return NextResponse.json({ error: e.message, detail: e.detail ?? null }, { status: 400 });
@@ -41,7 +41,6 @@ export async function POST(req: NextRequest) {
 
     const sub = await asMerchant(`/v2/customers/${b.customerId}/subscriptions`, {
       method: 'POST',
-      testmode: true,
       body,
     });
     return NextResponse.json(sub);
@@ -58,7 +57,6 @@ export async function DELETE(req: NextRequest) {
   try {
     const res = await asMerchant(`/v2/customers/${customerId}/subscriptions/${id}`, {
       method: 'DELETE',
-      testmode: true,
     });
     return NextResponse.json(res);
   } catch (e: any) {

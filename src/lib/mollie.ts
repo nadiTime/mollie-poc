@@ -1,5 +1,5 @@
 import { config, redirectUri } from './config';
-import { getConnection, updateDb, type Connection } from './store';
+import { getConnection, getTestmode, updateDb, type Connection } from './store';
 
 const API = 'https://api.mollie.com';
 
@@ -19,7 +19,7 @@ type FetchOpts = {
   body?: Record<string, unknown>;
   query?: Record<string, string | number | undefined>;
   token: string;
-  /** Add testmode=true (query for GET/DELETE, body for POST/PATCH). */
+  /** Add testmode=true (query for GET/DELETE, body for POST/PATCH). Omit or false = live. */
   testmode?: boolean;
 };
 
@@ -31,8 +31,7 @@ export async function mollieFetch<T = any>(path: string, opts: FetchOpts): Promi
   }
 
   let body = opts.body;
-  const wantTestmode = opts.testmode && config.testmode;
-  if (wantTestmode) {
+  if (opts.testmode) {
     if (method === 'GET' || method === 'DELETE') url.searchParams.set('testmode', 'true');
     else body = { ...(body || {}), testmode: true };
   }
@@ -135,10 +134,33 @@ export async function merchantProfileId(): Promise<string> {
   return id;
 }
 
-/** Convenience: call the Mollie API as the connected merchant. */
+/**
+ * A payment id doesn't say whether it's test or live, and with an OAuth token
+ * Mollie 404s when you ask in the wrong mode. Webhooks for a payment can arrive
+ * after the app switch has been flipped, so try the current mode, then the other.
+ */
+export async function fetchPayment<T = any>(id: string): Promise<T> {
+  const testmode = await getTestmode();
+  try {
+    return await asMerchant<T>(`/v2/payments/${id}`, { testmode });
+  } catch (e) {
+    if (!(e instanceof MollieError) || e.status !== 404) throw e;
+    return asMerchant<T>(`/v2/payments/${id}`, { testmode: !testmode });
+  }
+}
+
+/**
+ * Call the Mollie API as the connected merchant, in the mode of the app-wide
+ * switch. Pass `testmode` only to override it for a resource whose mode is
+ * already known, or `false` for org-level calls that aren't test/live scoped.
+ */
 export async function asMerchant<T = any>(
   path: string,
   opts: Omit<FetchOpts, 'token'> = {},
 ): Promise<T> {
-  return mollieFetch<T>(path, { ...opts, token: await merchantToken() });
+  return mollieFetch<T>(path, {
+    ...opts,
+    testmode: opts.testmode ?? (await getTestmode()),
+    token: await merchantToken(),
+  });
 }

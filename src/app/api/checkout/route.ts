@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { applicationFee, paymentReturnUrl, SUBSCRIPTION_PLAN, webhookUrl } from '@/lib/config';
 import { asMerchant, merchantProfileId } from '@/lib/mollie';
+import { getTestmode } from '@/lib/store';
 import { createSubscription } from '@/lib/subscription';
 
 export const dynamic = 'force-dynamic';
@@ -25,6 +26,15 @@ export async function POST(req: NextRequest) {
     const method: 'creditcard' | 'directdebit' = b.method === 'directdebit' ? 'directdebit' : 'creditcard';
     const amount = Number(b.amount).toFixed(2);
     const description: string = b.description || 'PoC payment';
+    // The page states the mode it was showing. If the switch was flipped since
+    // (another tab), stop — a test card token can't pay live, and nobody should
+    // be charged real money by a form that said "test".
+    // Every call below uses this value, not a fresh read of the switch, so a flip
+    // mid-request can't split one checkout across test and live.
+    const testmode = await getTestmode();
+    if (b.testmode !== testmode) {
+      throw new Error(`The app is now in ${testmode ? 'test' : 'live'} mode — reload the page and try again.`);
+    }
 
     if (!b.customerName || !b.customerEmail) {
       throw new Error('Customer name and email are required.');
@@ -33,7 +43,7 @@ export async function POST(req: NextRequest) {
     // Every checkout gets its own fresh Mollie customer.
     const customer = await asMerchant('/v2/customers', {
       method: 'POST',
-      testmode: true,
+      testmode,
       body: {
         name: b.customerName,
         email: b.customerEmail,
@@ -45,7 +55,7 @@ export async function POST(req: NextRequest) {
     if (method === 'directdebit') {
       const mandate = await asMerchant(`/v2/customers/${customer.id}/mandates`, {
         method: 'POST',
-        testmode: true,
+        testmode,
         body: {
           method: 'directdebit',
           consumerName: b.consumerName,
@@ -60,6 +70,7 @@ export async function POST(req: NextRequest) {
           customerId: customer.id,
           amount,
           description: `${description} (${mandate.id})`,
+          testmode,
         });
         return NextResponse.json({ mode, method, customer, mandate, subscription });
       }
@@ -71,6 +82,7 @@ export async function POST(req: NextRequest) {
         customerId: customer.id,
         mandateId: mandate.id,
         sequenceType: 'recurring',
+        testmode,
       });
       return NextResponse.json({ mode, method, customer, mandate, payment });
     }
@@ -94,6 +106,7 @@ export async function POST(req: NextRequest) {
       metadata: subscribing
         ? { source: 'mollie-connect-poc', intent: 'subscription', planAmount: amount, planDescription: description }
         : { source: 'mollie-connect-poc' },
+      testmode,
     });
 
     return NextResponse.json({
@@ -118,6 +131,7 @@ async function createPayment(opts: {
   customerId?: string;
   mandateId?: string;
   metadata?: Record<string, unknown>;
+  testmode: boolean;
 }) {
   const body: Record<string, unknown> = {
     amount: { currency: 'EUR', value: opts.amount },
@@ -138,5 +152,5 @@ async function createPayment(opts: {
   const fee = applicationFee(Number(opts.amount));
   if (fee) body.applicationFee = fee;
 
-  return asMerchant('/v2/payments', { method: 'POST', testmode: true, body });
+  return asMerchant('/v2/payments', { method: 'POST', testmode: opts.testmode, body });
 }
